@@ -43,7 +43,9 @@ def deflated_power_iteration(
     power_iter_err_threshold=1e-4,
     momentum=0.0,
     use_gpu=True,
+    most_negative=False,
     to_numpy=True,
+    verbose=True,
 ):
     """
     Compute top k eigenvalues by repeatedly subtracting out dyads
@@ -51,19 +53,40 @@ def deflated_power_iteration(
     num_eigenvals number of eigenvalues to compute
     power_iter_steps: number of steps per run of power iteration
     power_iter_err_threshold: early stopping threshold for power iteration
+
+    most_negative: if True, get the most negative eigenvalues instead
+
     returns: np.ndarray of top eigenvalues, np.ndarray of top eigenvectors
     """
     eigenvals = []
     eigenvecs = []
+
+    if most_negative:
+        top_eigenval, top_eigenvec = power_iteration(operator, power_iter_steps,
+                                          power_iter_err_threshold,
+                                          momentum=momentum,
+                                          use_gpu=use_gpu, 
+                                          verbose=verbose)
+        eigenvals.append(top_eigenval)
+        eigenvecs.append(top_eigenvec)
+        SCALE = 1.5  # make sure we deflate the main op enough
+        top_eigenval = SCALE * abs(top_eigenval)
+
+        def _min_op(x, op=operator):
+            return op.apply(x) - top_eigenval * x
+        operator = LambdaOperator(_min_op, operator.size)
+
     current_op = operator
     prev_vec = None
 
     def _deflate(x, val, vec):
         return val * vec.dot(x) * vec
 
-    log("beginning deflated power iteration")
+    if verbose:
+        log("beginning deflated power iteration")
     for i in range(num_eigenthings):
-        log("computing eigenvalue/vector %d of %d" % (i + 1, num_eigenthings))
+        if verbose:
+            log("computing eigenvalue/vector %d of %d" % (i + 1, num_eigenthings))
         eigenval, eigenvec = power_iteration(
             current_op,
             power_iter_steps,
@@ -71,14 +94,18 @@ def deflated_power_iteration(
             momentum=momentum,
             use_gpu=use_gpu,
             init_vec=prev_vec,
+            verbose=verbose
         )
-        log("eigenvalue %d: %.4f" % (i + 1, eigenval))
+        if verbose:
+            log("eigenvalue %d: %.4f" % (i + 1, eigenval))
 
         def _new_op_fn(x, op=current_op, val=eigenval, vec=eigenvec):
             return op.apply(x) - _deflate(x, val, vec)
 
         current_op = LambdaOperator(_new_op_fn, operator.size)
         prev_vec = eigenvec
+        if most_negative:
+            eigenval += top_eigenval
         eigenvals.append(eigenval)
         eigenvec = eigenvec.cpu()
         if to_numpy:
@@ -97,7 +124,8 @@ def deflated_power_iteration(
 
 
 def power_iteration(
-    operator, steps=20, error_threshold=1e-4, momentum=0.0, use_gpu=True, init_vec=None
+    operator, steps=20, error_threshold=1e-4, momentum=0.0, use_gpu=True, init_vec=None,
+    verbose=True
 ):
     """
     Compute dominant eigenvalue/eigenvector of a matrix
@@ -130,7 +158,8 @@ def power_iteration(
             error = 1.0
         else:
             error = np.abs(diff / lambda_estimate)
-        progress_bar(i, steps, "power iter error: %.4f" % error)
+        if verbose:
+            progress_bar(i, steps, "power iter error: %.4f" % error)
         if error < error_threshold:
             return lambda_estimate, vec
         prev_lambda = lambda_estimate

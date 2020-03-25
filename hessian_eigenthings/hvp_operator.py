@@ -126,6 +126,7 @@ def compute_hessian_eigenthings(
     mode="power_iter",
     use_gpu=True,
     max_samples=512,
+    verbose=True,
     **kwargs
 ):
     """
@@ -169,7 +170,7 @@ def compute_hessian_eigenthings(
     eigenvals, eigenvecs = None, None
     if mode == "power_iter":
         eigenvals, eigenvecs = deflated_power_iteration(
-            hvp_operator, num_eigenthings, use_gpu=use_gpu, **kwargs
+            hvp_operator, num_eigenthings, use_gpu=use_gpu, verbose=verbose, **kwargs
         )
     elif mode == "lanczos":
         eigenvals, eigenvecs = lanczos(
