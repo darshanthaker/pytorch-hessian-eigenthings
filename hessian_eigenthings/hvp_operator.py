@@ -24,6 +24,7 @@ class HVPOperator(Operator):
         criterion,
         use_gpu=True,
         full_dataset=True,
+        num_batches=10,
         max_samples=256,
     ):
         size = int(sum(p.numel() for p in model.parameters()))
@@ -38,6 +39,7 @@ class HVPOperator(Operator):
         self.criterion = criterion
         self.use_gpu = use_gpu
         self.full_dataset = full_dataset
+        self.num_batches = num_batches
         self.max_samples = max_samples
 
     def apply(self, vec):
@@ -46,9 +48,11 @@ class HVPOperator(Operator):
         the vectorized model parameters
         """
         if self.full_dataset:
-            return self._apply_full(vec)
-        else:
+            return self._apply_full(vec, len(self.data_loader))
+        elif self.num_batches == 1:
             return self._apply_batch(vec)
+        else:
+            return self._apply_full(vec, self.num_batches)
 
     def _apply_batch(self, vec):
         # compute original gradient, tracking computation graph
@@ -63,15 +67,14 @@ class HVPOperator(Operator):
         hessian_vec_prod = torch.cat([g.contiguous().view(-1) for g in grad_grad])
         return hessian_vec_prod
 
-    def _apply_full(self, vec):
-        n = len(self.dataloader)
+    def _apply_full(self, vec, num_batches):
         hessian_vec_prod = None
-        for _ in range(n):
+        for _ in range(num_batches):
             if hessian_vec_prod is not None:
                 hessian_vec_prod += self._apply_batch(vec)
             else:
                 hessian_vec_prod = self._apply_batch(vec)
-        hessian_vec_prod = hessian_vec_prod / n
+        hessian_vec_prod = hessian_vec_prod / num_batches
         return hessian_vec_prod
 
     def zero_grad(self):
@@ -126,6 +129,7 @@ def compute_hessian_eigenthings(
     mode="power_iter",
     use_gpu=True,
     max_samples=512,
+    num_batches=10,
     verbose=True,
     **kwargs
 ):
@@ -165,6 +169,7 @@ def compute_hessian_eigenthings(
         loss,
         use_gpu=use_gpu,
         full_dataset=full_dataset,
+        num_batches=num_batches,
         max_samples=max_samples,
     )
     eigenvals, eigenvecs = None, None
